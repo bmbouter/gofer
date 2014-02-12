@@ -44,6 +44,7 @@ def send(endpoint, destination, ttl=None, **body):
     :rtype: str
     """
     sn = getuuid()
+    amqp_destination = destination.exchange
     routing_key = destination.routing_key
     routing = (endpoint.id(), destination.dict())
     envelope = Envelope(sn=sn, version=VERSION, routing=routing)
@@ -51,7 +52,8 @@ def send(endpoint, destination, ttl=None, **body):
     messenger = endpoint.messenger()
     message = Message()
     message.ttl = milliseconds(ttl)
-    message.address = '/'.join((str(endpoint.url), routing_key))
+    message.address = '/'.join((str(endpoint.url), amqp_destination))
+    message.subject = routing_key
     message.body = envelope.dump()
     messenger.put(message)
     messenger.send()
