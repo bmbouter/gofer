@@ -15,7 +15,6 @@ from logging import getLogger
 from proton import Messenger
 
 from gofer import synchronized
-from gofer.messaging.model import getuuid
 from gofer.transport.endpoint import Endpoint as Base
 
 

@@ -37,6 +37,7 @@ class Reader(Endpoint):
         :type options: dict
         """
         Endpoint.__init__(self, **options)
+        self.queue = queue
         address = '/'.join((str(self.url), queue.name))
         messenger = self.messenger()
         messenger.subscribe(address)
@@ -53,12 +54,6 @@ class Reader(Endpoint):
         if messenger.incoming:
             message = Message()
             tracker = messenger.get(message)
-            if message:
-                try:
-                    auth.validate(self.authenticator, message.body)
-                except auth.ValidationFailed:
-                    self.ack(tracker)
-                    raise
             return tracker, message
         else:
             return None, None
@@ -71,11 +66,11 @@ class Reader(Endpoint):
         :return: A tuple of: (request, ack())
         :rtype: (Envelope, callable)
         """
+        uuid = self.queue.name
         tracker, message = self.get(timeout)
         if tracker:
-            request = Envelope()
-            request.load(message.body)
             try:
+                request = auth.validate(self.authenticator, uuid, message.body)
                 model.validate(request)
             except model.InvalidRequest:
                 self.ack(tracker)
