@@ -13,7 +13,9 @@ from logging import getLogger
 
 from proton import Message
 
-from gofer.messaging.model import Envelope, is_valid, search
+from gofer.messaging import auth
+from gofer.messaging import model
+from gofer.messaging.model import Envelope, search
 from gofer.transport.proton.endpoint import Endpoint
 
 
@@ -51,35 +53,45 @@ class Reader(Endpoint):
         if messenger.incoming:
             message = Message()
             tracker = messenger.get(message)
+            if message:
+                try:
+                    auth.validate(self.authenticator, message.body)
+                except auth.ValidationFailed:
+                    self.ack(tracker)
+                    raise
             return tracker, message
         else:
             return None, None
 
     def next(self, timeout=90):
         """
-        Get the next envelope from the queue.
+        Get the next request from the queue.
         :param timeout: The read timeout in seconds.
         :type timeout: int
-        :return: A tuple of: (envelope, ack())
+        :return: A tuple of: (request, ack())
         :rtype: (Envelope, callable)
         """
         tracker, message = self.get(timeout)
         if tracker:
-            envelope = Envelope()
-            envelope.load(message.body)
-            if is_valid(envelope):
-                log.debug('{%s} read next:\n%s', self.id(), envelope)
-                return envelope, Ack(self, tracker)
+            request = Envelope()
+            request.load(message.body)
+            try:
+                model.validate(request)
+            except model.InvalidRequest:
+                self.ack(tracker)
+                raise
+            log.debug('{%s} read next:\n%s', self.id(), request)
+            return request, Ack(self, tracker)
         return None, None
 
     def search(self, sn, timeout=90):
         """
-        Search the reply queue for the envelope with the matching serial #.
+        Search the reply queue for the request with the matching serial #.
         :param sn: The expected serial number.
         :type sn: str
         :param timeout: The read timeout.
         :type timeout: int
-        :return: The next envelope.
+        :return: The next request.
         :rtype: Envelope
         """
         return search(self, sn, timeout)

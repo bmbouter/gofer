@@ -13,6 +13,7 @@ from logging import getLogger
 
 from proton import Message
 
+from gofer.messaging import auth
 from gofer.messaging.model import getuuid, VERSION, Envelope
 from gofer.transport.proton.endpoint import Endpoint
 
@@ -39,25 +40,27 @@ def send(endpoint, destination, ttl=None, **body):
     :type destination: gofer.transport.model.Destination
     :param ttl: Time to Live (seconds)
     :type ttl: float
-    :keyword body: envelope body.
+    :keyword body: request body.
     :return: The message serial number.
     :rtype: str
     """
     sn = getuuid()
     amqp_destination = destination.exchange
     routing_key = destination.routing_key
-    routing = (endpoint.id(), destination.dict())
-    envelope = Envelope(sn=sn, version=VERSION, routing=routing)
-    envelope += body
+    routing = (endpoint.id(), routing_key)
+    request = Envelope(sn=sn, version=VERSION, routing=routing)
+    request += body
+    unsigned = request.dump()
+    signed = auth.sign(endpoint.authenticator, unsigned)
     messenger = endpoint.messenger()
     message = Message()
     message.ttl = milliseconds(ttl)
     message.address = '/'.join((str(endpoint.url), amqp_destination))
     message.subject = routing_key
-    message.body = envelope.dump()
+    message.body = signed
     messenger.put(message)
     messenger.send()
-    log.debug('{%s} sent (%s)\n%s', endpoint.id(), routing_key, envelope)
+    log.debug('{%s} sent (%s)\n%s', endpoint.id(), routing_key, request)
     return sn
 
 
@@ -76,7 +79,7 @@ class Producer(Endpoint):
         :type destination: gofer.transport.model.Destination
         :param ttl: Time to Live (seconds)
         :type ttl: float
-        :keyword body: envelope body.
+        :keyword body: request body.
         :return: The message serial number.
         :rtype: str
         """
@@ -89,7 +92,7 @@ class Producer(Endpoint):
         :type destinations: [gofer.transport.node.Destination,..]
         :param ttl: Time to Live (seconds)
         :type ttl: float
-        :keyword body: envelope body.
+        :keyword body: request body.
         :return: A list of (addr, sn).
         :rtype: list
         """

@@ -16,12 +16,13 @@ from proton import Messenger
 
 from gofer import synchronized
 from gofer.messaging.model import getuuid
+from gofer.transport.endpoint import Endpoint as Base
 
 
 log = getLogger(__name__)
 
 
-class Endpoint:
+class Endpoint(Base):
     """
     Base class for an AMQP endpoint.
     :ivar uuid: The unique endpoint id.
@@ -36,15 +37,14 @@ class Endpoint:
 
     LOCALHOST = 'amqp://0.0.0.0'
 
-    def __init__(self, uuid=None, url=None):
+    def __init__(self, uuid=None, url=LOCALHOST):
         """
         :param uuid: The endpoint uuid.
         :type uuid: str
         :param url: The broker url <transport>://<user>/<pass>@<host>:<port>.
         :type url: str
         """
-        self.uuid = uuid or getuuid()
-        self.url = url or self.LOCALHOST
+        Base.__init__(self, uuid, url)
         self.__mutex = RLock()
         self.__messenger = None
 
