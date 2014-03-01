@@ -21,7 +21,9 @@ classes on which we invoke methods.
 
 from new import classobj
 from threading import RLock
-from gofer.rmi.policy import *
+
+from gofer.messaging.model import Options
+from gofer.rmi.policy import Synchronous, Asynchronous
 from gofer.rmi.dispatcher import Request
 
 
@@ -188,7 +190,7 @@ class Stub:
     def __getattr__(self, name):
         """
         Python vodo.
-        Get a I{Method} object for any requested attribte.
+        Get a I{Method} object for any requested attribute.
         :param name: The attribute name.
         :type name: str
         :return: A method object.
@@ -200,7 +202,7 @@ class Stub:
     def __getitem__(self, name):
         """
         Python vodo.
-        Get a I{Method} object for any requested attribte.
+        Get a I{Method} object for any requested attribute.
         :param name: The attribute name.
         :type name: str
         :return: A method object.

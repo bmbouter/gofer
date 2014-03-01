@@ -14,16 +14,17 @@
 #
 
 from time import time
-from threading import local as Local
+from threading import Thread, local as Local
 from logging import getLogger
 
 from gofer.rmi.window import *
 from gofer.rmi.tracker import Tracker
-from gofer.rmi.store import PendingThread
+from gofer.rmi.store import Pending
 from gofer.rmi.dispatcher import Dispatcher, Return
-from gofer.rmi.threadpool import Immediate
+from gofer.rmi.threadpool import Trashed
 from gofer.messaging.model import Envelope
 from gofer.transport.model import Destination
+from gofer.constants import STARTED, PROGRESS
 from gofer.metrics import Timer
 
 
@@ -34,9 +35,9 @@ class Task:
     """
     An RMI task to be scheduled on the plugin's thread pool.
     :ivar plugin: A plugin.
-    :type plugin: Plugin
-    :ivar envelope: A gofer messaging envelope.
-    :type envelope: Envelope
+    :type plugin: gofer.agent.plugin.Plugin
+    :ivar request: A gofer messaging request.
+    :type request: Envelope
     :ivar commit: Transaction commit function.
     :type commit: callable
     :ivar window: The window in which the task is valid.
@@ -47,29 +48,29 @@ class Task:
     
     context = Local()
 
-    def __init__(self, plugin, envelope, commit):
+    def __init__(self, plugin, request, commit):
         """
         :param plugin: A plugin.
         :type plugin: Plugin
-        :param envelope: A gofer messaging envelope.
-        :type envelope: Envelope
+        :param request: The inbound request to be dispatched.
+        :type request: Envelope
         :param commit: Transaction commit function.
         :type commit: callable
         """
         self.plugin = plugin
-        self.envelope = envelope
+        self.request = request
         self.commit = commit
-        self.window = envelope.window
+        self.window = request.window
         self.ts = time()
         
     def __call__(self):
         """
         Dispatch received request.
         """
-        envelope = self.envelope
-        self.context.sn = envelope.sn
+        request = self.request
+        self.context.sn = request.sn
         self.context.progress = Progress(self)
-        self.context.cancelled = Cancelled(envelope.sn)
+        self.context.cancelled = Cancelled(request.sn)
         try:
             self.__call()
         finally:
@@ -81,17 +82,17 @@ class Task:
         """
         Dispatch received request.
         """
-        envelope = self.envelope
+        request = self.request
         try:
             self.window_missed()
-            self.send_started(envelope)
-            result = self.plugin.dispatch(envelope)
-            self.commit(envelope.sn)
-            self.send_reply(envelope, result)
+            self.send_started(request)
+            result = self.plugin.dispatch(request)
+            self.commit(request.sn)
+            self.send_reply(request, result)
         except WindowMissed:
-            self.commit(envelope.sn)
-            log.info('window missed:\n%s', envelope)
-            self.send_reply(envelope, Return.exception())
+            self.commit(request.sn)
+            log.info('window missed:\n%s', request)
+            self.send_reply(request, Return.exception())
 
     def window_missed(self):
         """
@@ -103,55 +104,53 @@ class Task:
         if not isinstance(w, dict):
             return
         window = Window(w)
-        envelope = self.envelope
+        request = self.request
         if window.past():
-            raise WindowMissed(envelope.sn)
+            raise WindowMissed(request.sn)
 
-    def send_started(self, envelope):
+    def send_started(self, request):
         """
         Send the a status update if requested.
-        :param envelope: The received envelope.
-        :type envelope: Envelope
+        :param request: The received request.
+        :type request: Envelope
         """
-        sn = envelope.sn
-        any = envelope.any
-        replyto = envelope.replyto
+        sn = request.sn
+        any = request.any
+        replyto = request.replyto
         if not replyto:
             return
         try:
-            tp = self.plugin.get_transport()
-            producer = tp.producer(url=envelope.url)
+            producer = self.producer()
             try:
                 producer.send(
                     Destination.create(replyto),
                     sn=sn,
                     any=any,
-                    status='started')
+                    status=STARTED)
             finally:
                 producer.close()
-        except:
+        except Exception:
             log.exception('send (started), failed')
             
-    def send_reply(self, envelope, result):
+    def send_reply(self, request, result):
         """
         Send the reply if requested.
-        :param envelope: The received envelope.
-        :type envelope: Envelope
+        :param request: The received request.
+        :type request: Envelope
         :param result: The request result.
         :type result: object
         """
-        sn = envelope.sn
-        any = envelope.any
-        ts = envelope.ts
+        sn = request.sn
+        any = request.any
+        ts = request.ts
         now = time()
         duration = Timer(ts, now)
-        replyto = envelope.replyto
+        replyto = request.replyto
         log.info('%s processed in: %s', sn, duration)
         if not replyto:
             return
         try:
-            tp = self.plugin.get_transport()
-            producer = tp.producer(url=envelope.url)
+            producer = self.producer()
             try:
                 producer.send(
                     Destination.create(replyto),
@@ -160,18 +159,25 @@ class Task:
                     result=result)
             finally:
                 producer.close()
-        except:
+        except Exception:
             log.exception('send failed:\n%s', result)
-            
 
-class EmptyPlugin:
+    def producer(self):
+        url = self.plugin.get_url()
+        tp = self.plugin.get_transport()
+        producer = tp.producer(url=url)
+        producer.authenticator = self.plugin.authenticator
+        return producer
+
+
+class TrashPlugin:
     """
-    An I{empty} plugin.
+    An *empty* plugin.
     Used when the appropriate plugin cannot be found.
     """
-    
-    def get_pool(self):
-        return Immediate()
+
+    def __init__(self):
+        self.pool = Trashed()
     
     def provides(self, classname):
         return False
@@ -179,16 +185,29 @@ class EmptyPlugin:
     def dispatch(self, request):
         d = Dispatcher({})
         return d.dispatch(request)
-    
 
-class Scheduler(PendingThread):
+
+class TrashProducer(object):
+    """
+    The producer used when an appropriate one cannot be found.
+    """
+
+    def send(self, *args, **kwargs):
+        """
+        Send replies into the bit bucket.
+        """
+        pass
+
+    def close(self):
+        pass
+
+
+class Scheduler(Thread):
     """
     The pending request scheduler.
     Processes the I{pending} queue.
     :ivar plugins: A collection of loaded plugins.
     :type plugins: list
-    :ivar producers: A cache of AMQP producers.
-    :type producers: dict
     """
     
     def __init__(self, plugins):
@@ -196,36 +215,36 @@ class Scheduler(PendingThread):
         :param plugins: A collection of loaded plugins.
         :type plugins: list
         """
-        PendingThread.__init__(self)
+        Thread.__init__(self, name='scheduler')
         self.plugins = plugins
+        self.pending = Pending()
+        self.setDaemon(True)
+
+    def run(self):
+        while True:
+            request = self.pending.get()
+            try:
+                plugin = self.find_plugin(request)
+                task = Task(plugin, request, self.pending.commit)
+                plugin.pool.run(task)
+            except Exception:
+                log.exception(request.sn)
         
-    def dispatch(self, envelope):
-        """
-        Dispatch the specified envelope to plugin that
-        provides the specified class.
-        :param envelope: A gofer messaging envelope.
-        :type envelope: Envelope
-        """
-        plugin = self.find_plugin(envelope)
-        task = Task(plugin, envelope, self.commit)
-        pool = plugin.getpool()
-        pool.run(task)
-        
-    def find_plugin(self, envelope):
+    def find_plugin(self, request):
         """
         Find the plugin that provides the class specified in
-        the I{request} embedded in the envelope.  Returns
+        the I{request} embedded in the request.  Returns
         EmptyPlugin when not found.
-        :param envelope: A gofer messaging envelope.
-        :type envelope: Envelope
+        :param request: A gofer messaging request.
+        :type request: Envelope
         :return: The appropriate plugin.
-        :rtype: Plugin
+        :rtype: gofer.agent.plugin.Plugin
         """
-        request = Envelope(envelope.request)
+        uuid = request.routing[1]
         for plugin in self.plugins:
-            if plugin.provides(request.classname):
+            if plugin.get_uuid() == uuid:
                 return plugin
-        return EmptyPlugin()
+        return TrashPlugin()
     
 
 class Context:
@@ -268,21 +287,19 @@ class Progress:
         """
         Send the progress report.
         """
-        sn = self.task.envelope.sn
-        any = self.task.envelope.any
-        replyto = self.task.envelope.replyto
+        sn = self.task.request.sn
+        any = self.task.request.any
+        replyto = self.task.request.replyto
         if not replyto:
             return
         try:
-            url = self.task.envelope.url
-            tp = self.task.plugin.get_transport()
-            producer = tp.producer(url=url)
+            producer = self.task.producer()
             try:
                 producer.send(
                     Destination.create(replyto),
                     sn=sn,
                     any=any,
-                    status='progress',
+                    status=PROGRESS,
                     total=self.total,
                     completed=self.completed,
                     details=self.details)
@@ -312,4 +329,8 @@ class Cancelled:
         return self.tracker.cancelled(self.sn)
 
     def __del__(self):
-        self.tracker.remove(self.sn)
+        try:
+            self.tracker.remove(self.sn)
+        except KeyError:
+            # already cleaned up
+            pass
