@@ -15,7 +15,7 @@ from proton import Message
 
 from gofer.messaging import auth
 from gofer.messaging import model
-from gofer.messaging.model import Envelope, search
+from gofer.messaging.model import Document, search
 from gofer.transport.proton.endpoint import Endpoint
 
 
@@ -60,34 +60,34 @@ class Reader(Endpoint):
 
     def next(self, timeout=90):
         """
-        Get the next request from the queue.
+        Get the next document from the queue.
         :param timeout: The read timeout in seconds.
         :type timeout: int
-        :return: A tuple of: (request, ack())
-        :rtype: (Envelope, callable)
+        :return: A tuple of: (document, ack())
+        :rtype: (Document, callable)
         """
         uuid = self.queue.name
         tracker, message = self.get(timeout)
         if tracker:
             try:
-                request = auth.validate(self.authenticator, uuid, message.body)
-                model.validate(request)
-            except model.InvalidRequest:
+                document = auth.validate(self.authenticator, uuid, message.body)
+                model.validate(document)
+            except model.InvalidDocument:
                 self.ack(tracker)
                 raise
-            log.debug('{%s} read next:\n%s', self.id(), request)
-            return request, Ack(self, tracker)
+            log.debug('{%s} read next:\n%s', self.id(), document)
+            return document, Ack(self, tracker)
         return None, None
 
     def search(self, sn, timeout=90):
         """
-        Search the reply queue for the request with the matching serial #.
+        Search the reply queue for the document with the matching serial #.
         :param sn: The expected serial number.
         :type sn: str
         :param timeout: The read timeout.
         :type timeout: int
-        :return: The next request.
-        :rtype: Envelope
+        :return: The next document.
+        :rtype: Document
         """
         return search(self, sn, timeout)
 
