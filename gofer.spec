@@ -186,6 +186,23 @@ Provides the gofer rabbitmq transport package.
 %doc LICENSE
 
 
+# --- python proton transport -------------------------------------------
+
+%package -n python-%{name}-proton
+Summary: Gofer proton transport python package
+Group: Development/Languages
+BuildRequires: python
+Requires: python-%{name} >= %{version}
+Requires: python-qpid-proton
+
+%description -n python-%{name}-proton
+Provides the gofer proton transport package.
+
+%files -n python-%{name}-proton
+%{python_sitelib}/%{name}/transport/proton
+%doc LICENSE
+
+
 # --- ruby lib ---------------------------------------------------------------
 
 %package -n ruby-%{name}
