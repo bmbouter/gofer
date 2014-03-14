@@ -34,6 +34,7 @@ from gofer.config import Config, Graph, get_bool
 from gofer.agent.action import Actions
 from gofer.agent.whiteboard import Whiteboard
 from gofer.transport import Transport
+from gofer.collator import Module
 
 
 log = getLogger(__name__)
@@ -76,7 +77,7 @@ class Plugin(object):
         :param plugin: The plugin to delete.
         :type plugin: Plugin
         """
-        for k,v in cls.plugins.items():
+        for k, v in cls.plugins.items():
             if v == plugin:
                 del cls.plugins[k]
         return plugin
@@ -125,14 +126,15 @@ class Plugin(object):
         self.pool = ThreadPool(int(descriptor.messaging.threads or 1))
         self.impl = None
         self.actions = []
-        self.dispatcher = Dispatcher([])
+        self.dispatcher = Dispatcher()
         self.whiteboard = Whiteboard()
         self.authenticator = None
         self.consumer = None
+        self.imported = {}
         
     def names(self):
         """
-        Get I{all} the names by which the plugin can be found.
+        Get *all* the names by which the plugin can be found.
         :return: A list of name and synonyms.
         :rtype: list
         """
@@ -178,12 +180,21 @@ class Plugin(object):
         url = self.get_url()
         transport = self.get_transport()
         broker = transport.broker(url)
-        broker.cacert = plugin.messaging.cacert or agent.messaging.cacert
-        broker.clientcert = plugin.messaging.clientcert or agent.messaging.clientcert
-        broker.validation = get_bool(plugin.messaging.validation or agent.messaging.validation)
+        broker.virtual_host = \
+            plugin.messaging.virtual_host or agent.messaging.virtual_host
+        broker.userid = \
+            plugin.messaging.userid or agent.messaging.userid
+        broker.password = \
+            plugin.messaging.password or agent.messaging.password
+        broker.cacert = \
+            plugin.messaging.cacert or agent.messaging.cacert
+        broker.clientcert = \
+            plugin.messaging.clientcert or agent.messaging.clientcert
+        broker.host_validation = \
+            get_bool(plugin.messaging.host_validation or agent.messaging.host_validation)
         log.debug('broker (qpid) configured: %s', broker)
         return broker
-    
+
     def set_uuid(self, uuid):
         """
         Set the plugin's UUID.
@@ -225,26 +236,31 @@ class Plugin(object):
         :param uuid: The (optional) messaging UUID.
         :type uuid: str
         """
+        self.detach()
         if not uuid:
             uuid = self.get_uuid()
         url = self.get_url()
-        tp = self.get_transport()
-        queue = tp.queue(uuid)
-        consumer = RequestConsumer(queue, url=url, transport=tp)
-        consumer.reader.authenticator = self.authenticator
-        consumer.start()
-        self.consumer = consumer
-    
+        if uuid and url:
+            tp = self.get_transport()
+            queue = tp.queue(uuid)
+            consumer = RequestConsumer(queue, url=url, transport=tp)
+            consumer.reader.authenticator = self.authenticator
+            consumer.start()
+            log.info('plugin uuid="%s", attached', uuid)
+            self.consumer = consumer
+        else:
+            log.error('plugin attach requires uuid and url')
+
     def detach(self):
         """
-        Detach (disconnect) from AMQP broker (if connected).
+        Detach (disconnect) from AMQP broker.
         """
-        if self.consumer:
-            self.consumer.close()
-            self.consumer = None
-            return True
-        else:
-            return False
+        if not self.consumer:
+            return
+        self.consumer.stop()
+        self.consumer.join()
+        self.consumer = None
+        log.info('plugin uuid="%s", detached', self.get_uuid())
         
     def cfg(self):
         """
@@ -262,35 +278,6 @@ class Plugin(object):
         :return: The RMI returned.
         """
         return self.dispatcher.dispatch(request)
-    
-    def provides(self, name):
-        """
-        Get whether a plugin provides the specified class.
-        :param name: A class (or module) name.
-        :type name: str
-        :return: True if provides.
-        :rtype: bool
-        """
-        return self.dispatcher.provides(name)
-    
-    def export(self, name):
-        """
-        Export an object defined in the plugin (module).
-        The name must reference a class or function object.
-        :param name: A name (class|function)
-        :type name: str
-        :return: The named item.
-        :rtype: (class|function)
-        :raise NameError: when not found
-        """
-        try:
-            obj = getattr(self.impl, name)
-            valid = inspect.isclass(obj) or inspect.isfunction(obj)
-            if valid:
-                return obj
-            raise TypeError('(%s) must be class|function' % name)
-        except AttributeError:
-            raise NameError(name)
 
     # deprecated
     getuuid = get_uuid
@@ -298,6 +285,33 @@ class Plugin(object):
     getbroker = get_broker
     setuuid = set_uuid
     seturl = set_url
+
+    def __getitem__(self, key):
+        try:
+            return self.dispatcher[key]
+        except KeyError:
+            return self.dispatcher[self.name][key]
+
+    def __iter__(self):
+        return iter(self.dispatcher)
+
+    def __iadd__(self, other):
+        if isinstance(other, Plugin):
+            for thing in other:
+                self.__iadd__(thing)
+            return self
+        if inspect.isclass(other):
+            self.dispatcher[other.__name__] = other
+            return self
+        if inspect.isfunction(other):
+            try:
+                mod = self.dispatcher[self.name]
+            except KeyError:
+                mod = Module(self.name)
+                self.dispatcher[self.name] = mod
+            mod += other
+            return self
+        return self
 
 
 class PluginDescriptor(Graph):
@@ -435,17 +449,15 @@ class PluginLoader:
             return plugin
 
     @staticmethod
-    def load(eager=True):
+    def load():
         """
         Load the plugins.
-        :param eager: Load disabled plugins.
-        :type eager: bool
         :return: A list of loaded plugins
         :rtype: list
         """
         loaded = []
         for plugin, descriptor in PluginDescriptor.load():
-            if PluginLoader.no_load(descriptor, eager):
+            if not get_bool(descriptor.main.enabled):
                 continue
             p = PluginLoader._import(plugin, descriptor)
             if not p:
@@ -454,22 +466,6 @@ class PluginLoader:
                 log.warn('plugin: %s, DISABLED', p.name)
             loaded.append(p)
         return loaded
-
-    @staticmethod
-    def no_load(descriptor, eager):
-        """
-        Determine whether the plugin should be loaded.
-        :param descriptor: A plugin descriptor.
-        :type descriptor: PluginDescriptor
-        :param eager: The I{eager} load flag.
-        :type eager: bool
-        :return: True when not loaded.
-        :rtype: bool
-        """
-        try:
-            return not (eager or get_bool(descriptor.main.enabled))
-        except Exception:
-            return False
 
     @staticmethod
     def _import(plugin, descriptor):
@@ -497,7 +493,7 @@ class PluginLoader:
             if p.enabled():
                 collated = Remote.collated()
                 collated += PluginLoader.BUILTINS
-                p.dispatcher = Dispatcher(collated)
+                p.dispatcher += collated
                 p.actions = Actions.collated()
             return p
         except Exception:

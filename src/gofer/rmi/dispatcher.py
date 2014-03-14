@@ -60,7 +60,7 @@ class MethodNotFound(DispatchError):
 
 class NotPermitted(DispatchError):
     """
-    Called method not decorated as I{remote}.
+    Called method not decorated as *remote*.
     """
 
     def __init__(self, method):
@@ -346,13 +346,13 @@ class RMI(object):
         self.name = '.'.join((request.classname, request.method))
         self.request = request
         self.auth = auth
-        self.inst = self.getclass(request, catalog)
-        self.method = self.getmethod(request, self.inst)
+        self.inst = self.find_class(request, catalog)
+        self.method = self.find_method(request, self.inst)
         self.args = request.args
         self.kwargs = request.kws
 
     @staticmethod
-    def getclass(request, catalog):
+    def find_class(request, catalog):
         """
         Get an instance of the class or module specified in
         the request using the catalog.
@@ -374,7 +374,7 @@ class RMI(object):
             return inst
 
     @staticmethod
-    def getmethod(request, inst):
+    def find_method(request, inst):
         """
         Get method of the class specified in the request.
         Ensures that remote invocation is permitted.
@@ -392,10 +392,10 @@ class RMI(object):
             raise MethodNotFound(cn, fn)
 
     @staticmethod
-    def __fn(method):
+    def fn(method):
         """
         Return the method's function (if a method) or
-        the I{method} assuming it's a function.
+        the *method* assuming it's a function.
         :param method: An instance method.
         :type method: instancemethod
         :return: The function
@@ -408,17 +408,17 @@ class RMI(object):
         return fn
 
     @staticmethod
-    def __fninfo(method):
+    def fninfo(method):
         """
-        Get the I{gofer} metadata embedded in the function
+        Get the *gofer* metadata embedded in the function
         by the @remote decorator.
         :param method: An instance method.
         :type method: instancemethod
-        :return: The I{gofer} attribute.
+        :return: The *gofer* attribute.
         :rtype: Options
         """
         try:
-            return getattr(RMI.__fn(method), NAME)
+            return getattr(RMI.fn(method), NAME)
         except:
             pass
 
@@ -430,7 +430,7 @@ class RMI(object):
         """
         cntr = request.cntr
         if not cntr:
-            cntr = ([],{})
+            cntr = ([], {})
         return cntr
 
     def permitted(self):
@@ -438,7 +438,7 @@ class RMI(object):
         Check whether remote invocation of the specified method is permitted.
         Applies security model using Security.
         """
-        fninfo = RMI.__fninfo(self.method)
+        fninfo = RMI.fninfo(self.method)
         if fninfo is None:
             raise NotPermitted(self)
         security = Security(self, fninfo)
@@ -490,7 +490,7 @@ class Security:
     def apply(self, passed):
         """
         Apply auth specifications.
-        :param passed: The request's I{auth} info passed.
+        :param passed: The request's *auth* info passed.
         :type passed: Options.
         :raise SecretRequired: On secret required and not passed.
         :raise SecretNotMatched: On not matched.
@@ -581,8 +581,8 @@ class Security:
 class Dispatcher:
     """
     The remote invocation dispatcher.
-    :ivar __catalog: The (catalog) of target classes.
-    :type __catalog: dict
+    :ivar catalog: The (catalog) of target classes.
+    :type catalog: dict
     """
 
     @staticmethod
@@ -602,15 +602,12 @@ class Dispatcher:
             document.sn,
             document.any)
 
-    def __init__(self, classes):
+    def __init__(self, classes=None):
         """
-        :param classes: The (catalog) of target classes.
+        :param classes: The (cataloged) of target classes.
         :type classes: list
         """
-        self.catalog = dict([(c.__name__, c) for c in classes])
-
-    def provides(self, name):
-        return name in self.catalog
+        self.catalog = dict([(c.__name__, c) for c in classes or []])
 
     def dispatch(self, document):
         """
@@ -631,3 +628,31 @@ class Dispatcher:
         except Exception:
             log.exception(str(document))
             return Return.exception()
+
+    def __iadd__(self, other):
+        if isinstance(other, Dispatcher):
+            self.catalog.update(other.catalog)
+            return self
+        if isinstance(other, list):
+            other = dict([(c.__name__, c) for c in other])
+            self.catalog.update(other)
+            return self
+        return self
+
+    def __getitem__(self, key):
+        return self.catalog[key]
+
+    def __setitem__(self, key, value):
+        self.catalog[key] = value
+
+    def __iter__(self):
+        _list = []
+        for n, v in self.catalog.items():
+            if inspect.isclass(v):
+                _list.append(v)
+                continue
+            for fn in inspect.getmembers(v, inspect.isfunction):
+                if RMI.fninfo(fn[1]):
+                    _list.append(fn[1])
+                continue
+        return iter(_list)

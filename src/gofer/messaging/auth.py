@@ -16,7 +16,9 @@
 Message authentication plumbing.
 """
 
+from hashlib import sha256
 from logging import getLogger
+from base64 import b64encode, b64decode
 
 from gofer.constants import AUTHENTICATION
 from gofer.messaging.model import Document, InvalidDocument
@@ -30,14 +32,12 @@ class ValidationFailed(InvalidDocument):
     Message validation failed.
     """
 
-    def __init__(self, message, details):
+    def __init__(self, details=None):
         """
-        :param message: The AMQP message that failed.
-        :type message: str
         :param details: A detailed description.
         :type details: str
         """
-        InvalidDocument.__init__(self, AUTHENTICATION, message, details)
+        InvalidDocument.__init__(self, AUTHENTICATION, '{}', details)
 
 
 class Authenticator(object):
@@ -45,23 +45,23 @@ class Authenticator(object):
     Document the message authenticator API.
     """
 
-    def sign(self, message):
+    def sign(self, digest):
         """
         Sign the specified message.
-        :param message: An AMQP message body.
-        :type message: str
+        :param digest: An AMQP message digest.
+        :type digest: str
         :return: The message signature.
         :rtype: str
         """
         raise NotImplementedError()
 
-    def validate(self, uuid, message, signature):
+    def validate(self, uuid, digest, signature):
         """
         Validate the specified message and signature.
         :param uuid: The uuid of the sender.
         :type uuid: str
-        :param message: An AMQP message body.
-        :type message: str
+        :param digest: An AMQP message digest.
+        :type digest: str
         :param signature: A message signature.
         :type signature: str
         :raises ValidationFailed: when message is not valid.
@@ -74,8 +74,8 @@ def sign(authenticator, message):
     Sign the message using the specified validator.
     signed document:
       {
-        signature: <signature>,
-        payload: <payload>
+        message: <message>,
+        signature: <signature>
       }
     :param authenticator: A message authenticator.
     :type authenticator: Authenticator
@@ -85,10 +85,14 @@ def sign(authenticator, message):
     if not authenticator:
         return message
     try:
-        signature = authenticator.sign(message)
-        signed = Document(signature=signature, payload=message)
+        h = sha256()
+        h.update(message)
+        digest = h.hexdigest()
+        signature = authenticator.sign(digest)
+        signed = Document(message=message, signature=encode(signature))
         message = signed.dump()
-    except Exception:
+    except Exception, e:
+        log.info(str(e))
         log.debug(message, exc_info=True)
     return message
 
@@ -98,8 +102,8 @@ def validate(authenticator, uuid, message):
     Validate the document using the specified validator.
     signed document:
       {
-        signature: <signature>,
-        payload: <payload>
+        message: <message>,
+        signature: <signature>
       }
     :param uuid: The destination uuid.
     :type uuid: str
@@ -113,22 +117,65 @@ def validate(authenticator, uuid, message):
     """
     if not message:
         return
+    document, original, signature = peal(message)
     try:
-        signed = Document()
-        signed.load(message)
-        signature = signed.signature
-        payload = signed.payload
-        document = Document()
-        if payload:
-            document.load(payload)
-        else:
-            document = signed
         if authenticator:
-            authenticator.validate(uuid, payload, signature)
+            h = sha256()
+            h.update(original)
+            digest = h.hexdigest()
+            authenticator.validate(uuid, digest, decode(signature))
         return document
-    except ValidationFailed:
-        raise
-    except Exception:
-        details = 'authenticator failed'
+    except ValidationFailed, failed:
+        failed.document = original
+        raise failed
+    except Exception, e:
+        details = str(e)
+        log.info(details)
         log.debug(details, exc_info=True)
-        raise ValidationFailed(message, details)
+        failed = ValidationFailed(details)
+        failed.document = original
+        raise failed
+
+
+def peal(message):
+    """
+    Peal the incoming message. The message one of:
+     - A signed document:
+        {
+          message: <message>,
+          signature: <signature>
+        }
+     - A plain (unsigned) RMI request.
+    Returns:
+    - The document to be passed along.
+    - The original (signed) AMQP message to be validated.
+    - The signature.
+    :param message: A json encoded AMQP message.
+    :type message: str
+    :return: tuple of: (document, original, signature)
+    :rtype: tuple
+    """
+    document = Document()
+    document.load(message)
+    signature = document.signature
+    original = document.message
+    if original:
+        document = Document()
+        document.load(original)
+    else:
+        original = message
+    return document, original, signature
+
+
+def encode(signature):
+    if signature:
+        return b64encode(signature)
+    else:
+        return ''
+
+
+def decode(signature):
+    if signature:
+        return b64decode(signature)
+    else:
+        return ''

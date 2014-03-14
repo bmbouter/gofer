@@ -39,13 +39,16 @@ class InvalidDocument(Exception):
         AUTHENTICATION: 'SECURITY: message authentication failed'
     }
 
-    def __init__(self, code, document, details):
+    def __init__(self, code, document, details=None):
         """
         :param code: The validation code.  Must be in: CODE.
+        :type code: str
         :param document: The invalid document.
+        :type document: str
         :param details: A detailed description of what failed.
+        :type details: str
         """
-        Exception.__init__(self, ' : '.join((self.CODE[code], details)))
+        Exception.__init__(self, ' : '.join((self.CODE[code], details or '')))
         assert code in InvalidDocument.CODE
         self.code = code
         self.document = document

@@ -2,8 +2,8 @@
 %{!?ruby_sitelib: %global ruby_sitelib %(ruby -rrbconfig  -e 'puts Config::CONFIG["sitelibdir"]')}
 
 Name: gofer
-Version: 1.0.0
-Release: 0.1%{?dist}
+Version: 1.0.4
+Release: 1%{?dist}
 Summary: A lightweight, extensible python agent
 Group:   Development/Languages
 License: LGPLv2
@@ -288,6 +288,42 @@ This plug-in provides RMI access to package (RPM) management.
 
 
 %changelog
+* Wed Mar 12 2014 Jeff Ortel <jortel@redhat.com> 1.0.4-1
+- Improved import between plugins. (jortel@redhat.com)
+
+* Tue Mar 11 2014 Jeff Ortel <jortel@redhat.com> 1.0.3-1
+- make queue non-exclusive by default. (jortel@redhat.com)
+
+* Mon Mar 10 2014 Jeff Ortel <jortel@redhat.com> 1.0.2-1
+- Log consumed messages. (jortel@redhat.com)
+
+* Mon Mar 10 2014 Jeff Ortel <jortel@redhat.com> 1.0.1-1
+- Improved agent logging. (jortel@redhat.com)
+
+* Mon Mar 10 2014 Jeff Ortel <jortel@redhat.com> 1.0.0-1
+- Detach before attach and make detach idempotent. (jortel@redhat.com)
+- Explicit manual plugin attach; get rid of plugin monitor thread.
+  (jortel@redhat.com)
+- Support virtual_host and host_validation configuration options.
+  (jortel@redhat.com)
+- Support userid and password configuration options. (jortel@redhat.com)
+- Change envelope/document and Envelope/Document. (jortel@redhat.com)
+- Support pluggable message authentication. (jortel@redhat.com)
+- Send 'accepted' status when RMI request is added to the pending queue.
+  (jortel@redhat.com)
+- Send 'rejected' status report when message validation failed.
+  (jortel@redhat.com)
+- Direct routing by uuid; no more blending of plugin APIs. (jortel@redhat.com)
+- Move Admin class from builtin plugin to internal. (jortel@redhat.com)
+- Improved pending queue. (jortel@redhat.com)
+- Improved thread pool. (jortel@redhat.com)
+- Purge unused filter in configuration. (jortel@redhat.com)
+- Discontinue support for configuration directives. (jortel@redhat.com)
+- Purge mocks in favor of python mock. (jortel@redhat.com)
+- Support multiple transports (amqplib, rabbmitmq, python-qpid).
+- Discontinue support for deprectated watchdog. (jortel@redhat.com)
+- Simplified RMI timeout.  No longer supporting timeout for RMI completion.
+  (jortel@redhat.com)
 * Tue Jan 14 2014 Jeff Ortel <jortel@redhat.com> 1.0.0-0.1
 - default asynchronous timeout to None. (jortel@redhat.com)
   add 'send' as required by transports. (jortel@redhat.com)
