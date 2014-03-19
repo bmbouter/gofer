@@ -26,6 +26,10 @@ URL = 'amqp://0.0.0.0:5672'
 
 if __name__ == '__main__':
     Transport.load_plugins()
+    # proton
     package = Transport.plugins['proton']
+    test = Test(URL, package)
+    test()
+    package = Transport.plugins['AMQP-1.0']
     test = Test(URL, package)
     test()

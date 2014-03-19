@@ -14,3 +14,10 @@ from gofer.transport.proton.broker import Broker
 from gofer.transport.proton.consumer import Reader
 from gofer.transport.proton.producer import Producer, send
 from gofer.transport.proton.endpoint import Endpoint
+
+
+PROVIDES = [
+    'AMQP-1.0',
+    'proton',
+    'qpid-proton'
+]
