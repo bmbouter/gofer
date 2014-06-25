@@ -1,3 +1,4 @@
+#! /usr/bin/env python
 #
 # Copyright (c) 2011 Red Hat, Inc.
 #
@@ -13,7 +14,15 @@
 # Jeff Ortel <jortel@redhat.com>
 #
 
-from gofer.agent.action import action
-from gofer.rmi.decorators import remote, pam, user
-from gofer.agent.plugin import initializer
+from gofer.decorators import *
 
+@initializer
+def init_plugin():
+    print 'Initialized!'
+
+
+class Lion(object):
+
+    @remote
+    def roar(self):
+        return 'Lion says ROAR!'

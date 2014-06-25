@@ -81,8 +81,7 @@ class Reader(Endpoint):
             if self.__opened:
                 return
             session = self.session()
-            address = str(self.queue)
-            self.__receiver = session.receiver(address)
+            self.__receiver = session.receiver(self.queue.name)
             self.__opened = True
         finally:
             self._unlock()
@@ -127,18 +126,17 @@ class Reader(Endpoint):
         :rtype: (Document, callable)
         :raises: model.InvalidDocument
         """
-        uuid = self.queue.name
         message = self.get(timeout)
         if message:
             try:
-                document = auth.validate(self.authenticator, uuid, message.content)
+                document = auth.validate(self.authenticator, message.content)
                 document.subject = subject(message)
                 document.ttl = message.ttl
                 model.validate(document)
             except model.InvalidDocument:
                 self.ack(message)
                 raise
-            log.debug('{%s} read next:\n%s', self.id(), document)
+            log.debug('read next: %s', document)
             return document, Ack(self, message)
         return None, None
 

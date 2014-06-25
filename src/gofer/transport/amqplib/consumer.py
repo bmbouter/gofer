@@ -58,7 +58,6 @@ class Reader(Endpoint):
         :rtype: amqplib.Message
         """
         channel = self.channel()
-        self.queue.declare(self.url)
         return channel.basic_get(self.queue.name)
 
     @reliable
@@ -73,17 +72,16 @@ class Reader(Endpoint):
         """
         delay = DELAY
         timer = float(timeout or 0)
-        uuid = self.queue.name
         while True:
             message = self.get()
             if message:
                 try:
-                    document = auth.validate(self.authenticator, uuid, message.body)
+                    document = auth.validate(self.authenticator, message.body)
                     model.validate(document)
                 except model.InvalidDocument:
                     self.ack(message)
                     raise
-                log.debug('{%s} read next:\n%s', self.id(), document)
+                log.debug('read next: %s', document)
                 return document, Ack(self, message)
             if timer > 0:
                 sleep(delay)

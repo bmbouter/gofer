@@ -56,14 +56,22 @@ Defines messaging properties:
 
 - **url** - The broker connection URL.
   No value indicates that gofer should **not** connect to the broker.
-  *format*: *<protocol>://<host>:<port>*, protocol is one of:
-  - **tcp**: non-SSL protocol
-  - **amqp**: non-SSL protocol
-  - **ssl**: SSL protocol
-  - **amqps**: SSL protocol
+  *format*: *<protocol>://<user>:<password>@<host>:<port>/<virtual-host>*, protocol is one of:
+
+   - **tcp**:   non-SSL protocol
+   - **amqp**:  non-SSL protocol
+   - **ssl**:   SSL protocol
+   - **amqps**: SSL protocol
+
+  The <user>:<password> and /<virtual-host> are optional. The <port> is optional and defaults
+  based on the protocol when not specified:
+
+   - (amqp|tcp)  port:5672
+   - (amqps|ssl) port:5671
+
 - **transport** - The transport used to connect to the specified broker.
 - **cacert** - The (optional) SSL CA certificate used to validate the server certificate.
-- **virtual_host** - The A
+- **virtual_host** - The (optional) broker virtual host.
 - **clientcert** - The (optional) SSL client certificate.
 - **host_validation** - The (optional) flag indicates SSL host validation should be performed.
 - **userid** - The (optional) userid used for authentication.
@@ -83,11 +91,6 @@ Example:
  clientcert = /etc/pki/qpid/client/client.pem
 
 
-[loader]
---------
-
-Defines plugin loading properties.
-
 Plugin Descriptors
 ^^^^^^^^^^^^^^^^^^
 
@@ -99,14 +102,23 @@ are *ini* style configuration that require the following sections and properties
 
 Defines basic plugin properties.
 
+- **name** - The (optional) plugin name.  The basename of the descriptor is used when not specified.
+- **plugin** - The (optional) fully qualified module to be loaded from the PYTHON path.
+  When *plugin* is not specified, the plugin is loaded by searching the following directories for a
+  module with the same name as the plugin:
+
+    - /usr/share/gofer/plugins
+    - /usr/lib/gofer/plugins
+    - /usr/lib64/gofer/plugins
+    - /opt/gofer/plugins
+
 - **enabled** - Specify the plugin as enabled/disabled.
 - **requires** -  Specify (optional) required (,) comma separated list of plugins by name.
-  Ensure proper loading order.
+- **extends** - Specify (optional) another plugin to extend by name.
 
 [messaging]
 -----------
 
-- **enabled** - Specify the plugin as enabled/disabled.
 - **uuid** - The default agent (UUID) identity.
   This value may be overridden by an *identity* plugin.
 - **'url** - The (optional) QPID connection URL.

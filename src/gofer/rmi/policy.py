@@ -22,7 +22,7 @@ from logging import getLogger
 from gofer.messaging.model import Document, InvalidDocument, getuuid
 from gofer.messaging import Destination
 from gofer.rmi.dispatcher import Return, RemoteException
-from gofer.constants import ACCEPTED, REJECTED, STARTED, PROGRESS
+from gofer.transport import Transport
 from gofer.metrics import Timer
 
 
@@ -128,7 +128,7 @@ class RequestMethod:
     :ivar url: The agent URL.
     :type url: str
     :ivar transport: The AMQP transport.
-    :type transport: gofer.transport.Transport
+    :type transport: str
     """
     
     def __init__(self, url, transport):
@@ -136,7 +136,7 @@ class RequestMethod:
         :param url: The agent URL.
         :type url: str
         :param transport: The AMQP transport.
-        :type transport: gofer.transport.Transport
+        :type transport: str
         """
         self.url = url
         self.transport = transport
@@ -177,15 +177,16 @@ class Synchronous(RequestMethod):
         :param url: The agent URL.
         :type url: str
         :param transport: The AMQP transport.
-        :type transport: gofer.transport.Transport
+        :type transport: str
         :param options: Policy options.
         :type options: dict
         """
+        tp = Transport(transport)
         RequestMethod.__init__(self, url, transport)
         self.timeout = Timeout.seconds(options.timeout or 10)
         self.wait = Timeout.seconds(options.wait or 90)
         self.progress = options.progress
-        self.queue = transport.queue(getuuid())
+        self.queue = tp.queue(getuuid())
         self.authenticator = options.authenticator
         self.queue.auto_delete = True
         self.queue.declare(self.url)
@@ -202,9 +203,12 @@ class Synchronous(RequestMethod):
         :rtype: object
         :raise Exception: returned by the peer.
         """
+        tp = Transport(self.transport)
         replyto = self.queue.destination()
-        producer = self.transport.producer(url=self.url)
+        producer = tp.producer(url=self.url)
         producer.authenticator = self.authenticator
+        queue = tp.queue(destination.routing_key)
+        queue.declare(self.url)
         try:
             sn = producer.send(
                 destination,
@@ -214,8 +218,8 @@ class Synchronous(RequestMethod):
                 **any)
         finally:
             producer.close()
-        log.debug('sent (%s):\n%s', repr(destination), request)
-        reader = self.transport.reader(self.url, self.queue)
+        log.debug('sent (%s): %s', repr(destination), request)
+        reader = tp.reader(self.url, self.queue)
         reader.authenticator = self.authenticator
         try:
             self.__get_accepted(sn, reader)
@@ -225,8 +229,8 @@ class Synchronous(RequestMethod):
 
     def __get_accepted(self, sn, reader):
         """
-        Get the ACCEPTED reply matched by serial number.
-        In the event the ACCEPTED message got lost, the STARTED
+        Get the 'accepted' reply matched by serial number.
+        In the event the 'accepted' message got lost, the 'started'
         status is also processed.
         :param sn: The request serial number.
         :type sn: str
@@ -236,15 +240,14 @@ class Synchronous(RequestMethod):
         :rtype: Document
         """
         document = reader.search(sn, self.timeout)
-        if document:
-            if document.status == REJECTED:
-                raise InvalidDocument(document.code, sn, document.details)
-            if document.status in (ACCEPTED, STARTED):
-                log.debug('request (%s), %s', sn, document.status)
-            else:
-                self.__on_reply(document)
-        else:
+        if not document:
             raise RequestTimeout(sn, self.timeout)
+        if document.status == 'rejected':
+            raise InvalidDocument(document.code, sn, document.details)
+        if document.status in ('accepted', 'started'):
+            log.debug('request (%s), %s', sn, document.status)
+        else:
+            self.__on_reply(document)
 
     def __get_reply(self, sn, reader):
         """
@@ -267,17 +270,16 @@ class Synchronous(RequestMethod):
                 raise RequestTimeout(sn, self.wait)
             else:
                 timeout -= elapsed
-            if document:
-                if document.status == REJECTED:
-                    raise InvalidDocument(document.code, sn, document.details)
-                if document.status in (ACCEPTED, STARTED):
-                    continue
-                if document.status == PROGRESS:
-                    self.__on_progress(document)
-                else:
-                    return self.__on_reply(document)
-            else:
+            if not document:
                 raise RequestTimeout(sn, self.wait)
+            if document.status == 'rejected':
+                raise InvalidDocument(document.code, sn, document.details)
+            if document.status in ('accepted', 'started'):
+                continue
+            if document.status == 'progress':
+                self.__on_progress(document)
+            else:
+                return self.__on_reply(document)
         
     def __on_reply(self, document):
         """
@@ -323,7 +325,7 @@ class Asynchronous(RequestMethod):
         :param url: The agent URL.
         :type url: str
         :param transport: The AMQP transport.
-        :type transport: gofer.transport.Transport
+        :type transport: str
         :param options: Policy options.
         :type options: dict
         """
@@ -437,12 +439,15 @@ class Trigger:
         object and generated serial number.
         """
         policy = self.__policy
+        tp = Transport(policy.transport)
         destination = self.__destination
         replyto = policy.replyto()
         request = self.__request
         any = self.__any
-        producer = policy.transport.producer(url=policy.url)
+        producer = tp.producer(url=policy.url)
         producer.authenticator = policy.authenticator
+        queue = tp.queue(destination.routing_key)
+        queue.declare(policy.url)
         try:
             producer.send(
                 destination,
@@ -453,7 +458,7 @@ class Trigger:
                 **any)
         finally:
             producer.close()
-        log.debug('sent (%s):\n%s', repr(destination), request)
+        log.debug('sent (%s): %s', repr(destination), request)
     
     def __str__(self):
         return self.__sn

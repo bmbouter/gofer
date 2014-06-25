@@ -20,7 +20,6 @@ from hashlib import sha256
 from logging import getLogger
 from base64 import b64encode, b64decode
 
-from gofer.constants import AUTHENTICATION
 from gofer.messaging.model import Document, InvalidDocument
 
 
@@ -32,12 +31,20 @@ class ValidationFailed(InvalidDocument):
     Message validation failed.
     """
 
+    CODE = 'security.authentication'
+    DESCRIPTION = 'SECURITY: message authentication failed'
+
     def __init__(self, details=None):
         """
         :param details: A detailed description.
         :type details: str
         """
-        InvalidDocument.__init__(self, AUTHENTICATION, '{}', details)
+        InvalidDocument.__init__(
+            self,
+            code=self.CODE,
+            description=self.DESCRIPTION,
+            document='{}',
+            details=details)
 
 
 class Authenticator(object):
@@ -55,11 +62,11 @@ class Authenticator(object):
         """
         raise NotImplementedError()
 
-    def validate(self, uuid, digest, signature):
+    def validate(self, document, digest, signature):
         """
         Validate the specified message and signature.
-        :param uuid: The uuid of the sender.
-        :type uuid: str
+        :param document: The original signed document.
+        :type document: Document
         :param digest: An AMQP message digest.
         :type digest: str
         :param signature: A message signature.
@@ -97,7 +104,7 @@ def sign(authenticator, message):
     return message
 
 
-def validate(authenticator, uuid, message):
+def validate(authenticator, message):
     """
     Validate the document using the specified validator.
     signed document:
@@ -105,8 +112,6 @@ def validate(authenticator, uuid, message):
         message: <message>,
         signature: <signature>
       }
-    :param uuid: The destination uuid.
-    :type uuid: str
     :param authenticator: A message authenticator.
     :type authenticator: Authenticator
     :param message: A json encoded AMQP message.
@@ -123,7 +128,7 @@ def validate(authenticator, uuid, message):
             h = sha256()
             h.update(original)
             digest = h.hexdigest()
-            authenticator.validate(uuid, digest, decode(signature))
+            authenticator.validate(document, digest, decode(signature))
         return document
     except ValidationFailed, failed:
         failed.document = original

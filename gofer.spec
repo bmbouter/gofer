@@ -1,8 +1,13 @@
 %{!?python_sitelib: %global python_sitelib %(%{__python} -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())")}
 %{!?ruby_sitelib: %global ruby_sitelib %(ruby -rrbconfig  -e 'puts Config::CONFIG["sitelibdir"]')}
 
+# Determine supported
+%if 0%{?rhel} >= 7 || 0%{?fedora} >= 18
+%define systemd 1
+%endif
+
 Name: gofer
-Version: 1.0.4
+Version: 1.3.0
 Release: 1%{?dist}
 Summary: A lightweight, extensible python agent
 Group:   Development/Languages
@@ -17,13 +22,19 @@ BuildRequires: python-setuptools
 BuildRequires: rpm-python
 Requires: python-%{name} = %{version}
 Requires: python-iniparse
+%if 0%{?systemd}
+BuildRequires: systemd
+Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
+%endif
 %description
 Gofer provides an extensible, light weight, universal python agent.
 The gofer core agent is a python daemon (service) that provides
 infrastructure for exposing a remote API and for running Recurring
 Actions. The APIs contributed by plug-ins are accessible by Remote
-Method Invocation (RMI). The transport for RMI is AMQP using the
-QPID message broker. Actions are also provided by plug-ins and are
+Method Invocation (RMI). The transport for RMI is AMQP using an
+AMQP message broker. Actions are also provided by plug-ins and are
 executed at the specified interval.
 
 %prep
@@ -62,17 +73,22 @@ mkdir -p %{buildroot}/%{_sysconfdir}/%{name}
 mkdir -p %{buildroot}/%{_sysconfdir}/%{name}/plugins
 mkdir -p %{buildroot}/%{_sysconfdir}/%{name}/conf.d
 mkdir -p %{buildroot}/%{_sysconfdir}/init.d
-mkdir -p %{buildroot}/%{_var}/log/%{name}
+mkdir -p %{buildroot}/%{_unitdir}
 mkdir -p %{buildroot}/%{_usr}/lib/%{name}/plugins
 mkdir -p %{buildroot}/%{_usr}/share/%{name}/plugins
 mkdir -p %{buildroot}/%{_mandir}/man1
 
 cp bin/%{name}d %{buildroot}/usr/bin
-cp etc/init.d/%{name}d %{buildroot}/%{_sysconfdir}/init.d
 cp etc/%{name}/*.conf %{buildroot}/%{_sysconfdir}/%{name}
 cp etc/%{name}/plugins/*.conf %{buildroot}/%{_sysconfdir}/%{name}/plugins
 cp src/plugins/*.py %{buildroot}/%{_usr}/share/%{name}/plugins
 cp docs/man/man1/* %{buildroot}/%{_mandir}/man1
+
+%if 0%{?systemd}
+cp usr/lib/systemd/system/* %{buildroot}/%{_unitdir}
+%else
+cp etc/init.d/%{name}d %{buildroot}/%{_sysconfdir}/init.d
+%endif
 
 rm -rf %{buildroot}/%{python_sitelib}/%{name}*.egg-info
 
@@ -85,10 +101,13 @@ rm -rf %{buildroot}
 %dir %{_usr}/lib/%{name}/plugins/
 %dir %{_usr}/share/%{name}/plugins/
 %dir %{_sysconfdir}/%{name}/conf.d/
-%dir %{_var}/log/%{name}/
 %{python_sitelib}/%{name}/agent/
 %{_bindir}/%{name}d
+%if 0%{?systemd}
+%attr(755,root,root) %{_unitdir}/%{name}d.service
+%else
 %attr(755,root,root) %{_sysconfdir}/init.d/%{name}d
+%endif
 %config(noreplace) %{_sysconfdir}/%{name}/agent.conf
 %config(noreplace) %{_sysconfdir}/%{name}/plugins/builtin.conf
 %{_usr}/share/%{name}/plugins/builtin.*
@@ -96,13 +115,26 @@ rm -rf %{buildroot}
 %doc %{_mandir}/man1/gofer*
 
 %post
+%if 0%{?systemd}
+%systemd_post %{name}d.service
+%else
 chkconfig --add %{name}d
+%endif
 
 %preun
+%if 0%{?systemd}
+%systemd_preun %{name}d.service
+%else
 if [ $1 = 0 ] ; then
    /sbin/service %{name}d stop >/dev/null 2>&1
    /sbin/chkconfig --del %{name}d
 fi
+%endif
+
+%postun
+%if 0%{?systemd}
+%systemd_postun_with_restart %{name}d.service
+%endif
 
 
 # --- python lib -------------------------------------------------------------
@@ -112,9 +144,9 @@ Summary: Gofer python lib modules
 Group: Development/Languages
 Obsoletes: %{name}-lib
 BuildRequires: python
-Requires: python-simplejson
 Requires: PyPAM
 %if 0%{?rhel} && 0%{?rhel} < 6
+Requires: python-simplejson
 Requires: python-hashlib
 Requires: python-uuid
 %endif
@@ -271,6 +303,66 @@ This plug-in provides RMI access to package (RPM) management.
 
 
 %changelog
+* Mon Jun 16 2014 Jeff Ortel <jortel@redhat.com> 1.3.0-1
+- Update man page to reference github. (jortel@redhat.com)
+- Replace --console option with --foreground and use in systemd unit.
+  (jortel@redhat.com)
+- systemd support. (jortel@redhat.com)
+
+* Mon Jun 09 2014 Jeff Ortel <jortel@redhat.com> 1.2.1-1
+- 1107244 - python 2.4 compat issues. (jortel@redhat.com)
+* Thu May 29 2014 Jeff Ortel <jortel@redhat.com> 1.2.0-1
+- Add authenticator param to ReplyConsumer constructor. (jortel@redhat.com)
+- python 2.4 compat. (jortel@redhat.com)
+
+* Wed May 28 2014 Jeff Ortel <jortel@redhat.com> 1.1.0-1
+- Pass original document during auth validation instead of destination uuid.
+  (jortel@redhat.com)
+- Better support for associating an authenticator with a consumer.
+  (jortel@redhat.com)
+
+* Tue May 20 2014 Jeff Ortel <jortel@redhat.com> 1.0.13-1
+- Fix setting logging levels in agent.conf. (jortel@redhat.com)
+- In the amqplib transport, message durable=True. (jortel@redhat.com)
+
+* Wed May 14 2014 Jeff Ortel <jortel@redhat.com> 1.0.12-1
+- 1097732 - broker configured during attach. (jortel@redhat.com)
+- Support loading plugins from the PYTHON path. (jortel@redhat.com)
+- Support custom plugin naming. (jortel@redhat.com)
+
+* Tue May 06 2014 Jeff Ortel <jortel@redhat.com> 1.0.10-1
+- Condition Requires: and import of simplejson. (jortel@redhat.com)
+* Fri May 02 2014 Jeff Ortel <jortel@redhat.com> 1.0.9-1
+- Fix url syntax for userid:password; get vhost from url path component.
+  (jortel@redhat.com)
+
+* Thu May 01 2014 Jeff Ortel <jortel@redhat.com> 1.0.8-1
+- Inject inbound_url to support reply when plugin is not found.
+  (jortel@redhat.com)
+- Pass and store transport by name (instead of object). (jortel@redhat.com)
+- Set transport package based on actual packaged. (jortel@redhat.com)
+- Declare agent (target) queue in RMI policy send. (jortel@redhat.com)
+- Create queues in the consumer instead of the reader. (jortel@redhat.com)
+
+* Tue Apr 22 2014 Jeff Ortel <jortel@redhat.com> 1.0.7-1
+- Support extends= in plugin descriptors.  Defines another plugin to extend.
+  (jortel@redhat.com)
+
+* Thu Apr 17 2014 Jeff Ortel <jortel@redhat.com> 1.0.6-1
+- Inject inbound transport name on request receipt and used to reply when
+  unable to route to a plugin. (jortel@redhat.com)
+- Trash plugin implements get_url() and get_transport(). (jortel@redhat.com)
+- Log when plugin not found and request is trashed. (jortel@redhat.com)
+- PathMonitor initialized to prevent initial notification. (jortel@redhat.com)
+- Add @initializer decorator and plugin support. (jortel@redhat.com)
+- Fix pending message leak when uuid not matched to a plugin.
+  (jortel@redhat.com)
+* Mon Mar 31 2014 Jeff Ortel <jortel@redhat.com> 1.0.5-1
+- Log to syslog instead of /var/log/gofer/. (jortel@redhat.com)
+- Support userid/password in the broker url. (jortel@redhat.com)
+- Remove librabbitmq transport. (jortel@redhat.com)
+- Add support for skipping SSL validation. (jortel@redhat.com)
+- Use qpid builtin SSL transport. (jortel@redhat.com)
 * Wed Mar 12 2014 Jeff Ortel <jortel@redhat.com> 1.0.4-1
 - Improved import between plugins. (jortel@redhat.com)
 

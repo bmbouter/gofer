@@ -18,7 +18,7 @@ from logging import getLogger
 from gofer.rmi.store import Pending
 from gofer.messaging import Consumer, Destination
 from gofer.messaging.model import Document
-from gofer.constants import ACCEPTED, REJECTED
+from gofer.transport import Transport
 
 log = getLogger(__name__)
 
@@ -33,10 +33,13 @@ class RequestConsumer(Consumer):
     def dispatch(self, request):
         """
         Dispatch received request.
+        Update the request: inject the inbound_url and inbound_transport.
         :param request: The received request.
         :type request: Document
         """
-        self.__send_status(request, ACCEPTED)
+        self.__send_status(request, 'accepted')
+        request.inbound_url = self.url
+        request.inbound_transport = self.transport
         pending = Pending()
         pending.put(request)
 
@@ -53,7 +56,7 @@ class RequestConsumer(Consumer):
         """
         request = Document()
         request.load(message)
-        self.__send_status(request, REJECTED, code=code, details=details)
+        self.__send_status(request, 'rejected', code=code, details=details)
 
     def request_rejected(self, code, request, details):
         """
@@ -66,7 +69,7 @@ class RequestConsumer(Consumer):
         :param details: The explanation.
         :type details: str
         """
-        self.__send_status(request, REJECTED, code=code, details=details)
+        self.__send_status(request, 'rejected', code=code, details=details)
 
     def __send_status(self, request, status, **details):
         """
@@ -84,7 +87,7 @@ class RequestConsumer(Consumer):
         try:
             endpoint = self.reader
             destination = Destination.create(replyto)
-            self.transport.plugin.send(
-                endpoint, destination, sn=sn, any=any, status=status, **details)
+            tp = Transport(self.transport)
+            tp.plugin.send(endpoint, destination, sn=sn, any=any, status=status, **details)
         except Exception:
             log.exception('send (%s), failed', status)

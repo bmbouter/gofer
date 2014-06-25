@@ -35,12 +35,12 @@ class Broker(_Broker):
     A generic AMQP broker.
     """
 
-    def __init__(self, url=DEFAULT_URL):
+    def __init__(self, url=None):
         """
         :param url: The broker url <transport>://<host>:<port>.
         :type url: str
         """
-        _Broker.__init__(self, url)
+        _Broker.__init__(self, url or DEFAULT_URL)
 
     def connect(self):
         """
@@ -67,7 +67,7 @@ class Broker(_Broker):
         """
         while True:
             try:
-                log.info('connecting:\n%s', self)
+                log.info('connecting: %s', self)
                 con = Connection(
                     host=':'.join((self.host, str(self.port))),
                     virtual_host=self.virtual_host or VIRTUAL_HOST,

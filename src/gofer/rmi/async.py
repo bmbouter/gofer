@@ -22,7 +22,6 @@ from logging import getLogger
 from gofer.messaging.model import Document
 from gofer.messaging import Consumer
 from gofer.rmi.dispatcher import Reply, Return, RemoteException
-from gofer.constants import ACCEPTED, REJECTED, STARTED, PROGRESS
 
 
 log = getLogger(__name__)
@@ -37,16 +36,19 @@ class ReplyConsumer(Consumer):
     :type blacklist: set
     """
 
-    def __init__(self, queue, url=None, transport=None):
+    def __init__(self, queue, url=None, transport=None, authenticator=None):
         """
         :param queue: The AMQP node.
         :type queue: gofer.transport.model.Queue
         :param url: The broker URL.
         :type url: str
         :param transport: An AMQP transport.
-        :type transport: (str|gofer.transport.Transport)
+        :type transport: str
+        :param authenticator: A message authenticator.
+        :type authenticator: gofer.messaging.auth.Authenticator
         """
         Consumer.__init__(self, queue, url=url, transport=transport)
+        self.reader.authenticator = authenticator
         self.listener = None
         self.blacklist = set()
 
@@ -257,7 +259,7 @@ class Accepted(AsyncReply):
     def __str__(self):
         s = list()
         s.append(AsyncReply.__str__(self))
-        s.append(ACCEPTED)
+        s.append('accepted')
         return '\n'.join(s)
 
 
@@ -276,7 +278,7 @@ class Rejected(AsyncReply):
     def __str__(self):
         s = list()
         s.append(AsyncReply.__str__(self))
-        s.append(REJECTED)
+        s.append('rejected')
         return '\n'.join(s)
 
 
@@ -295,7 +297,7 @@ class Started(AsyncReply):
     def __str__(self):
         s = list()
         s.append(AsyncReply.__str__(self))
-        s.append(STARTED)
+        s.append('started')
         return '\n'.join(s)
 
 

@@ -20,11 +20,11 @@ from logging import getLogger
 from gofer.rmi.window import *
 from gofer.rmi.tracker import Tracker
 from gofer.rmi.store import Pending
-from gofer.rmi.dispatcher import Dispatcher, Return
-from gofer.rmi.threadpool import Trashed
+from gofer.rmi.dispatcher import Return, PluginNotFound
+from gofer.rmi.threadpool import Direct
+from gofer.transport import Transport
 from gofer.messaging.model import Document
 from gofer.transport.model import Destination
-from gofer.constants import STARTED, PROGRESS
 from gofer.metrics import Timer
 
 
@@ -91,7 +91,7 @@ class Task:
             self.send_reply(request, result)
         except WindowMissed:
             self.commit(request.sn)
-            log.info('window missed:\n%s', request)
+            log.info('window missed: %s', request)
             self.send_reply(request, Return.exception())
 
     def window_missed(self):
@@ -126,7 +126,7 @@ class Task:
                     Destination.create(replyto),
                     sn=sn,
                     any=any,
-                    status=STARTED)
+                    status='started')
             finally:
                 producer.close()
         except Exception:
@@ -146,7 +146,7 @@ class Task:
         now = time()
         duration = Timer(ts, now)
         replyto = request.replyto
-        log.info('%s processed in: %s', sn, duration)
+        log.info('sn=%s processed in: %s', sn, duration)
         if not replyto:
             return
         try:
@@ -160,11 +160,16 @@ class Task:
             finally:
                 producer.close()
         except Exception:
-            log.exception('send failed:\n%s', result)
+            log.exception('send failed: %s', result)
 
     def producer(self):
+        """
+        Get a configured producer.
+        :return: A producer.
+        :rtype: Producer
+        """
         url = self.plugin.get_url()
-        tp = self.plugin.get_transport()
+        tp = Transport(self.plugin.get_transport())
         producer = tp.producer(url=url)
         producer.authenticator = self.plugin.authenticator
         return producer
@@ -176,12 +181,24 @@ class TrashPlugin:
     Used when the appropriate plugin cannot be found.
     """
 
-    def __init__(self):
-        self.pool = Trashed()
+    def __init__(self, url, transport):
+        self.url = url
+        self.transport = transport
+        self.authenticator = None
+        self.pool = Direct()
+
+    def get_url(self):
+        return self.url
+
+    def get_transport(self):
+        return self.transport
     
     def dispatch(self, request):
-        d = Dispatcher()
-        return d.dispatch(request)
+        try:
+            log.info('request sn=%s, trashed', request.sn)
+            raise PluginNotFound(request.routing[1])
+        except PluginNotFound:
+            return Return.exception()
 
 
 class TrashProducer(object):
@@ -241,7 +258,8 @@ class Scheduler(Thread):
         for plugin in self.plugins:
             if plugin.get_uuid() == uuid:
                 return plugin
-        return TrashPlugin()
+        log.info('plugin not found for uuid=%s', uuid)
+        return TrashPlugin(request.inbound_url, request.inbound_transport)
     
 
 class Context:
@@ -296,7 +314,7 @@ class Progress:
                     Destination.create(replyto),
                     sn=sn,
                     any=any,
-                    status=PROGRESS,
+                    status='progress',
                     total=self.total,
                     completed=self.completed,
                     details=self.details)
