@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.curdir, '../../src'))
 from logging import basicConfig
 
 from base import Test
-from gofer.transport import Transport
+from gofer.transport.factory import Loader
 
 
 basicConfig()
@@ -25,11 +25,14 @@ basicConfig()
 URL = 'amqp://0.0.0.0:5672'
 
 if __name__ == '__main__':
-    Transport.load_plugins()
+    loader = Loader()
+    loader.load()
+    package = loader.plugins
     # proton
-    package = Transport.plugins['proton']
+    package = loader.plugins['proton']
     test = Test(URL, package)
     test()
-    package = Transport.plugins['AMQP-1.0']
+    # AMQP-1.0
+    package = loader.plugins['AMQP-1.0']
     test = Test(URL, package)
     test()
